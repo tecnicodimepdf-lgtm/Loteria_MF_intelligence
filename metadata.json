@@ -1,0 +1,5 @@
+{
+  "name": "Loteria_MF_intelligence",
+  "description": "Lottery prediction engine using Swarm Intelligence with Statistical, Patterns, and Entropy agents.",
+  "requestFramePermissions": []
+}

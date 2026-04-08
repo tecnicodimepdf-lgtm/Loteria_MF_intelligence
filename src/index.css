@@ -1,0 +1,17 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Outfit:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Outfit", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-miro-primary: #0ea5e9;
+  --color-miro-secondary: #6366f1;
+  --color-miro-accent: #f43f5e;
+  --color-miro-bg: #0f172a;
+  --color-miro-card: #1e293b;
+}
+
+body {
+  @apply bg-miro-bg text-slate-100 font-sans antialiased;
+}
