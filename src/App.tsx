@@ -414,10 +414,28 @@ export default function App() {
         // GEMINI API MODE
         const ai = new GoogleGenAI({ apiKey });
         
+        const sortedFreq = Object.entries(freqMap).sort((a,b) => b[1] - a[1]).map(e => parseInt(e[0]));
+        const sortedDelay = Object.entries(delayMap).sort((a,b) => b[1] - a[1]).map(e => parseInt(e[0]));
+        
+        // Calculate new universes for Option B
+        const zonaMorna = sortedFreq.slice(22, 37); // The middle 15 numbers
+        const repetentesProvaveis = results.length > 0 ? results[0].dezenas : [];
+        
+        const top5Freq = sortedFreq.slice(0, 5);
+        const vizinhosQuentesSet = new Set<number>();
+        top5Freq.forEach(id => {
+          if (id > 1) vizinhosQuentesSet.add(id - 1);
+          if (id < 60) vizinhosQuentesSet.add(id + 1);
+        });
+        const vizinhosQuentes = Array.from(vizinhosQuentesSet).filter(id => !top5Freq.includes(id));
+
         const statsContext = {
-          top_frequentes: Object.entries(freqMap).sort((a,b) => b[1] - a[1]).slice(0, 15).map(e => e[0]),
-          maiores_atrasos: Object.entries(delayMap).sort((a,b) => b[1] - a[1]).slice(0, 15).map(e => e[0]),
-          correlacoes_fortes: Object.entries(correlations).sort((a,b) => b[1] - a[1]).slice(0, 15).map(e => e[0])
+          top_frequentes: sortedFreq.slice(0, 15),
+          maiores_atrasos: sortedDelay.slice(0, 15),
+          correlacoes_fortes: Object.entries(correlations).sort((a,b) => b[1] - a[1]).slice(0, 15).map(e => e[0]),
+          zona_morna: zonaMorna,
+          repetentes_ultimo_concurso: repetentesProvaveis,
+          vizinhos_quentes: vizinhosQuentes
         };
 
       const feedbackContext = suggestions
@@ -426,9 +444,9 @@ export default function App() {
         .map((s: any) => {
           const hitsPerGame = s.games.map((g: any) => g.filter((n: any) => s.actual_result?.includes(n)).length);
           const distribution = {
-            low: hitsPerGame.filter(h => h <= 2).length,
-            mid: hitsPerGame.filter(h => h === 3).length,
-            high: hitsPerGame.filter(h => h >= 4).length
+            low: hitsPerGame.filter((h: number) => h <= 2).length,
+            mid: hitsPerGame.filter((h: number) => h === 3).length,
+            high: hitsPerGame.filter((h: number) => h >= 4).length
           };
           return `Sugestão ID: ${s.id}, Resultado Real: ${s.actual_result?.join(',')}, Distribuição Acertos: Low(${distribution.low}), Mid(${distribution.mid}), High(${distribution.high})`;
         })
@@ -454,8 +472,12 @@ TAREFA:
 1. Execute a simulação multiagente (30 ciclos) com perfis Conservador, Explorador e Híbrido.
 2. Utilize a memória temporal para evoluir as combinações.
 3. PREMISSA ABSOLUTA: Otimize as combinações para maximizar a probabilidade de acertos de 3, 4, 5 ou 6 dezenas em um mesmo jogo. Penalize severamente padrões de baixa performance (0, 1 ou 2 acertos).
-4. Gere EXATAMENTE 5 sugestões estratégicas com baixa sobreposição.
-${customObjective ? `5. DIRETRIZ DO USUÁRIO: ${customObjective}` : ''}
+4. REGRA DE COMPOSIÇÃO DE UNIVERSOS: Para alcançar a premissa acima e quebrar o teto de 1-2 acertos, você DEVE mesclar dezenas dos extremos (quentes/atrasadas) com os novos universos fornecidos nos DADOS ESTATÍSTICOS:
+   - ZONA MORNA: Inclua 1 a 2 dezenas de média frequência em cada jogo.
+   - REPETENTES: Considere a forte probabilidade de 1 dezena do último concurso se repetir.
+   - VIZINHOS QUENTES: Utilize a adjacência das dezenas mais frequentes para capturar desvios locais.
+5. Gere EXATAMENTE 5 sugestões estratégicas com baixa sobreposição.
+${customObjective ? `6. DIRETRIZ DO USUÁRIO: ${customObjective}` : ''}
 Retorne JSON estrito.`,
         config: {
           systemInstruction: SYSTEM_INSTRUCTION.replace('{MATURITY_LEVEL}', maturity.toString()),
