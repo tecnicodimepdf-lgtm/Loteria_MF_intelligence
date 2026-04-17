@@ -40,7 +40,8 @@ import {
   HardDrive,
   Cpu,
   Cloud,
-  Key
+  Key,
+  FileDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
@@ -666,6 +667,47 @@ Retorne JSON estrito.`,
     });
   };
 
+  const exportSuggestionsToCSV = (suggestion: GameSuggestion) => {
+    const header = "Jogo;Bola1;Bola2;Bola3;Bola4;Bola5;Bola6\n";
+    const rows = suggestion.games.map((game, idx) => 
+      `${idx + 1};${game.map(n => n.toString().padStart(2, '0')).join(';')}`
+    ).join('\n');
+    
+    const csvContent = header + rows;
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `mirofish_sugestoes_${suggestion.concurso_alvo || 'extra'}_${new Date(suggestion.timestamp).toISOString().split('T')[0]}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const recoverSuggestion = (s: GameSuggestion) => {
+    setSwarmResult({
+      simulation_metadata: {
+        cycles_completed: 30,
+        agents_active: ["Conservador", "Explorador", "Híbrido"],
+        convergence_rate: "Recuperado do Histórico"
+      },
+      debate: { 
+        conservador: "Dados recuperados da memória persistida.", 
+        explorador: "Dados recuperados da memória persistida.", 
+        hibrido: "Dados recuperados da memória persistida." 
+      },
+      prediction: { 
+        concurso_alvo: s.concurso_alvo || "", 
+        sugestoes: s.games, 
+        analise_de_risco: "Recuperado", 
+        probabilidade_calculada: "Recuperado", 
+        insights_aprendizado: s.insights || "",
+        otimizacao_meta: "Recuperado"
+      }
+    });
+    setConferenceInput(s.actual_result?.join(',') || "");
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const graphData = useMemo((): SwarmGraphData => {
     const nodes: GraphNode[] = Array.from({ length: 60 }, (_, i) => ({
       id: i + 1,
@@ -970,6 +1012,13 @@ Retorne JSON estrito.`,
                           
                           {/* Real Result Input */}
                           <div className="flex items-center gap-2 w-full md:w-auto">
+                            <button 
+                              onClick={() => exportSuggestionsToCSV(suggestions[0])}
+                              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold flex items-center gap-2 transition-all"
+                              title="Exportar para CSV"
+                            >
+                              <FileDown className="w-4 h-4" /> Exportar
+                            </button>
                             <input 
                               type="text" 
                               placeholder="01,02,03,04,05,06"
@@ -1057,7 +1106,7 @@ Retorne JSON estrito.`,
                                     <p className="text-[10px] text-slate-500">{new Date(s.timestamp).toLocaleDateString()} {new Date(s.timestamp).toLocaleTimeString()}</p>
                                   </div>
                                 </div>
-                                <div className="flex items-center gap-4">
+                                <div className="flex items-center gap-2">
                                   {s.actual_result ? (
                                     <div className="text-right">
                                       <p className="text-xs font-black text-green-400">{maxHits} Acertos Máx.</p>
@@ -1072,16 +1121,22 @@ Retorne JSON estrito.`,
                                   ) : (
                                     <span className="text-[10px] text-slate-500 uppercase font-bold">Pendente</span>
                                   )}
-                                  <button onClick={() => {
-                                    setSwarmResult({
-                                      debate: { estatistico: "", padroes: "", entropia: "" },
-                                      prediction: { concurso_alvo: s.concurso_alvo || "", sugestoes: s.games, analise_de_risco: "", probabilidade_calculada: "", insights_aprendizado: s.insights || "" }
-                                    });
-                                    setConferenceInput(s.actual_result?.join(',') || "");
-                                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                                  }} className="p-2 hover:bg-blue-500/10 rounded-lg transition-colors">
-                                    <Eye className="w-4 h-4 text-blue-400" />
-                                  </button>
+                                  <div className="flex gap-1">
+                                    <button 
+                                      onClick={() => exportSuggestionsToCSV(s)}
+                                      className="p-2 hover:bg-slate-800 rounded-lg transition-colors text-slate-500"
+                                      title="Exportar CSV"
+                                    >
+                                      <FileDown className="w-4 h-4" />
+                                    </button>
+                                    <button 
+                                      onClick={() => recoverSuggestion(s)}
+                                      className="p-2 hover:bg-blue-500/10 rounded-lg transition-colors"
+                                      title="Visualizar/Recuperar"
+                                    >
+                                      <Eye className="w-4 h-4 text-blue-400" />
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
                             );
