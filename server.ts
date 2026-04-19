@@ -15,7 +15,7 @@ const PERSISTENCE_LIMIT_MB = 10;
 
 app.use(express.json({ limit: '50mb' }));
 
-// Helper to get file size
+// Auxiliar para obter o tamanho do arquivo
 const getFileSize = async (filePath: string) => {
   try {
     const stats = await fs.stat(filePath);
@@ -25,7 +25,7 @@ const getFileSize = async (filePath: string) => {
   }
 };
 
-// API ROUTES
+// ROTAS DA API
 app.get("/api/state", async (req, res) => {
   try {
     if (fsSync.existsSync(STATE_FILE)) {
@@ -96,7 +96,7 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok" });
 });
 
-// VITE MIDDLEWARE
+// MIDDLEWARE DO VITE
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

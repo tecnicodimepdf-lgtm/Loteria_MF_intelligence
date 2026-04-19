@@ -76,7 +76,7 @@ FLUXO DE SIMULAÇÃO INTENSIVA:
 - Execute no mínimo 30 ciclos de simulação interna.
 - Cada ciclo deve evoluir a memória dos agentes com base nas combinações geradas nos ciclos anteriores.
 - Introduza variação controlada (ruído) para evitar convergência prematura em padrões de apenas 1 ou 2 acertos.
-- Selecione EXATAMENTE 5 combinações que apresentarem maior recorrência e equilíbrio entre os agentes ao longo das simulações, sempre visando a meta de 3 a 6 acertos.
+- Selecione EXATAMENTE {SUGGESTION_COUNT} combinações que apresentarem maior recorrência e equilíbrio entre os agentes ao longo das simulações, sempre visando a meta de 3 a 6 acertos.
 
 LOGICA DE APRENDIZADO (Maturidade):
 - Utilize o histórico de resultados reais para calibrar os agentes.
@@ -86,7 +86,7 @@ LOGICA DE APRENDIZADO (Maturidade):
 
 REGRAS DE RESPOSTA:
 - O debate deve ser técnico e profundo, refletindo a lógica MiroFish e o foco em 3 a 6 acertos.
-- Forneça EXATAMENTE 5 jogos de 6 dezenas cada.
+- Forneça EXATAMENTE {SUGGESTION_COUNT} jogos de 6 dezenas cada.
 - Retorne obrigatoriamente em JSON estruturado conforme o esquema definido.`;
 
 const RESPONSE_SCHEMA = {
@@ -148,6 +148,9 @@ export default function App() {
   const [learning, setLearning] = useState(false);
   const [learningProgress, setLearningProgress] = useState(0);
   const [customObjective, setCustomObjective] = useState("");
+  const [analysisStrategy, setAnalysisStrategy] = useState<'A' | 'B' | 'C'>(() => (localStorage.getItem('mirofish_strategy') as 'A' | 'B' | 'C') || 'B');
+  const [analysisInterval, setAnalysisInterval] = useState<number>(0); // 0 = todos
+  const [suggestionCount, setSuggestionCount] = useState<5 | 10>(() => (parseInt(localStorage.getItem('mirofish_suggestion_count') || "10") as 5 | 10));
   const [customApiKey, setCustomApiKey] = useState(() => localStorage.getItem('mirofish_api_key') || "");
   const [processingMode, setProcessingMode] = useState<'api' | 'local'>(() => (localStorage.getItem('mirofish_processing_mode') as 'api' | 'local') || 'api');
   const [storageMode, setStorageMode] = useState<'backend' | 'local'>(() => (localStorage.getItem('mirofish_storage_mode') as 'backend' | 'local') || 'backend');
@@ -161,7 +164,7 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
 
-  // Load state from backend or local storage
+  // Carregar estado do backend ou armazenamento local
   const loadState = async () => {
     if (storageMode === 'local') {
       const localData = localStorage.getItem('mirofish_local_db');
@@ -177,7 +180,7 @@ export default function App() {
             last_save: data.parameters?.last_update || new Date().toISOString(),
             record_count: (data.results?.length || 0) + (data.suggestions?.length || 0),
             file_size_bytes: sizeBytes,
-            limit_mb: 5, // 5MB typical localStorage limit
+            limit_mb: 5, // Limite típico de 5MB para localStorage
             usage_percent: (sizeBytes / (5 * 1024 * 1024)) * 100
           });
         } catch (e) {
@@ -266,7 +269,7 @@ export default function App() {
     loadState();
     const savedTheme = localStorage.getItem('mirofish_theme');
     if (savedTheme) setTheme(savedTheme as 'dark' | 'light');
-  }, [storageMode]); // Reload state if storage mode changes
+  }, [storageMode]); // Recarregar estado se o modo de armazenamento mudar
 
   useEffect(() => {
     localStorage.setItem('mirofish_theme', theme);
@@ -302,12 +305,17 @@ export default function App() {
           saveState(finalResults);
           return finalResults;
         });
-        // Navigate to Database after ingestion
+        // Ir para a Base de Dados após ingestão
         setActiveTab('database');
       },
       error: (err) => setError("Erro ao processar CSV: " + err.message)
     });
   };
+
+  useEffect(() => {
+    localStorage.setItem('mirofish_strategy', analysisStrategy);
+    localStorage.setItem('mirofish_suggestion_count', suggestionCount.toString());
+  }, [analysisStrategy, suggestionCount]);
 
   const runIntelligence = async () => {
     if (results.length === 0) {
@@ -323,18 +331,43 @@ export default function App() {
     try {
       const apiKey = customApiKey || process.env.GEMINI_API_KEY;
       
-      // Graph Building: Pre-calculate statistics for the agents
+      // Filtrar resultados com base no intervalo
+      const analyzedResults = analysisInterval > 0 ? results.slice(0, analysisInterval) : results;
+
+      // PASSO: ANÁLISE DE CADEIAS DE MARKOV
+      const transitions = calculateMarkovTransistions(results.slice(0, 200)); // Últimos 200 para tendências recentes de Markov
+      const lastResult = results[0]?.dezenas || [];
+      const markovHotMap: Record<number, number> = {};
+      lastResult.forEach(p => {
+        if (transitions[p]) {
+          Object.entries(transitions[p]).forEach(([target, count]) => {
+            markovHotMap[parseInt(target)] = (markovHotMap[parseInt(target)] || 0) + count;
+          });
+        }
+      });
+      const sortedMarkov = Object.entries(markovHotMap).sort((a,b) => b[1] - a[1]).slice(0, 10).map(e => parseInt(e[0]));
+
+      // PASSO: BACKTESTING PRE-FLIGHT
+      // Verificar o que teria sido "quente" para o ÚLTIMO concurso
+      const backtestResults = results.slice(1, 101); // Contexto para o penúltimo
+      const lastActual = results[0]?.dezenas || [];
+      const backtestFreq: Record<number, number> = {};
+      backtestResults.forEach(r => r.dezenas.forEach(d => backtestFreq[d] = (backtestFreq[d] || 0) + 1));
+      const backtestHot = Object.entries(backtestFreq).sort((a,b) => b[1] - a[1]).slice(0, 10).map(e => parseInt(e[0]));
+      const backtestSuccess = backtestHot.filter(n => lastActual.includes(n)).length;
+
+      // Construção do Grafo: Pré-calcular estatísticas para os agentes
       const freqMap: Record<number, number> = {};
       const delayMap: Record<number, number> = {};
       const correlations: Record<string, number> = {};
       
-      results.forEach((r, idx) => {
+      analyzedResults.forEach((r, idx) => {
         r.dezenas.forEach(d => {
           freqMap[d] = (freqMap[d] || 0) + 1;
           if (idx === 0) delayMap[d] = 0;
         });
         
-        // Simple correlation (pairs)
+        // Correlação simples (pares)
         for(let i=0; i<r.dezenas.length; i++) {
           for(let j=i+1; j<r.dezenas.length; j++) {
             const pair = [r.dezenas[i], r.dezenas[j]].sort((a,b) => a-b).join(',');
@@ -343,12 +376,45 @@ export default function App() {
         }
       });
 
-      // Calculate delays
+      // Calcular atrasos com base no histórico total (verificação de entropia)
       const allNumbers = Array.from({length: 60}, (_, i) => i + 1);
       allNumbers.forEach(n => {
         const lastIndex = results.findIndex(r => r.dezenas.includes(n));
         delayMap[n] = lastIndex === -1 ? results.length : lastIndex;
       });
+
+      // OPÇÃO C: ANÁLISE DE SIMILITUDE
+      let similitudeContext = null;
+      if (analysisStrategy === 'C' && results.length > 50) {
+        const last5 = results.slice(0, 5);
+        const last5AvgSum = last5.reduce((acc, r) => acc + r.dezenas.reduce((s, d) => s + d, 0), 0) / 5;
+        
+        // Encontrar janelas no passado com média de soma similar
+        const similarFreqMap: Record<number, number> = {};
+        let windowsFound = 0;
+        for (let i = 5; i < results.length - 10; i++) {
+          const window = results.slice(i, i + 5);
+          const windowAvgSum = window.reduce((acc, r) => acc + r.dezenas.reduce((s, d) => s + d, 0), 0) / 5;
+          
+          if (Math.abs(windowAvgSum - last5AvgSum) < 10) { // Tolerância de 10 na soma
+            windowsFound++;
+            window.forEach(r => r.dezenas.forEach(d => similarFreqMap[d] = (similarFreqMap[d] || 0) + 1));
+            if (windowsFound >= 10) break; // Analisar até 10 janelas similares
+          }
+        }
+        
+        if (windowsFound > 0) {
+          const topInSimilitude = Object.entries(similarFreqMap)
+            .sort((a,b) => b[1] - a[1])
+            .slice(0, 15)
+            .map(e => parseInt(e[0]));
+          similitudeContext = {
+            avg_sum_target: last5AvgSum,
+            windows_detected: windowsFound,
+            top_dezenas_in_similar_patterns: topInSimilitude
+          };
+        }
+      }
 
       let jsonResponse: SwarmResponse;
 
@@ -357,25 +423,25 @@ export default function App() {
           console.warn("API Key não encontrada. Realizando fallback para processamento local.");
         }
         
-        // LOCAL FALLBACK MODE
+        // MODO DE FALLBACK LOCAL
         const sortedNumbers = Object.entries(freqMap)
           .sort((a, b) => b[1] - a[1])
           .map(entry => parseInt(entry[0]));
         
-        const hotNumbers = sortedNumbers.slice(0, 10);
-        const coldNumbers = sortedNumbers.slice(-10).reverse();
+        const hotNumbers = sortedNumbers.slice(0, 12);
+        const coldNumbers = sortedNumbers.slice(-12).reverse();
         
         const generateGame = (strategy: 'hot' | 'balanced' | 'random') => {
           const game = new Set<number>();
           if (strategy === 'hot') {
-            hotNumbers.slice(0, 8).forEach(n => game.add(n));
+            hotNumbers.slice(0, 6).forEach(n => game.add(n));
           } else if (strategy === 'balanced') {
-            hotNumbers.slice(0, 5).forEach(n => game.add(n));
-            coldNumbers.slice(0, 5).forEach(n => game.add(n));
+            hotNumbers.slice(0, 3).forEach(n => game.add(n));
+            coldNumbers.slice(0, 3).forEach(n => game.add(n));
           }
           
-          while(game.size < 15) {
-            game.add(allNumbers[Math.floor(Math.random() * 60)]);
+          while(game.size < 6) {
+            game.add(allNumbers[Math.floor(Math.random() * 60)] + 1);
           }
           return Array.from(game).sort((a, b) => a - b);
         };
@@ -395,13 +461,12 @@ export default function App() {
           },
           prediction: {
             concurso_alvo: nextConcurso,
-            sugestoes: [
-              generateGame('hot'),
-              generateGame('balanced'),
-              generateGame('balanced'),
-              generateGame('random'),
-              generateGame('random')
-            ],
+            sugestoes: Array.from({ length: suggestionCount }, (_, i) => {
+              if (i === 0) return generateGame('hot');
+              if (i < suggestionCount * 0.4) return generateGame('hot');
+              if (i < suggestionCount * 0.8) return generateGame('balanced');
+              return generateGame('random');
+            }),
             analise_de_risco: "Risco Moderado. Geração baseada puramente em estatística local sem inferência de IA.",
             probabilidade_calculada: "N/A (Modo Local)",
             insights_aprendizado: "O sistema está operando offline/localmente. As sugestões são geradas por um algoritmo estatístico local em vez do motor de IA.",
@@ -409,17 +474,17 @@ export default function App() {
           }
         };
 
-        // Simulate processing time
+        // Simular tempo de processamento
         await new Promise(resolve => setTimeout(resolve, 1500));
       } else {
-        // GEMINI API MODE
+        // MODO API GEMINI
         const ai = new GoogleGenAI({ apiKey });
         
         const sortedFreq = Object.entries(freqMap).sort((a,b) => b[1] - a[1]).map(e => parseInt(e[0]));
         const sortedDelay = Object.entries(delayMap).sort((a,b) => b[1] - a[1]).map(e => parseInt(e[0]));
         
-        // Calculate new universes for Option B
-        const zonaMorna = sortedFreq.slice(22, 37); // The middle 15 numbers
+        // Calcular novos universos para a Opção B
+        const zonaMorna = sortedFreq.slice(22, 37); // As 15 dezenas centrais
         const repetentesProvaveis = results.length > 0 ? results[0].dezenas : [];
         
         const top5Freq = sortedFreq.slice(0, 5);
@@ -431,12 +496,24 @@ export default function App() {
         const vizinhosQuentes = Array.from(vizinhosQuentesSet).filter(id => !top5Freq.includes(id));
 
         const statsContext = {
+          base_size_total: results.length,
+          interval_analyzed: analysisInterval === 0 ? "Toda a Base" : `Últimos ${analysisInterval} concursos`,
+          strategy_active: analysisStrategy,
           top_frequentes: sortedFreq.slice(0, 15),
           maiores_atrasos: sortedDelay.slice(0, 15),
           correlacoes_fortes: Object.entries(correlations).sort((a,b) => b[1] - a[1]).slice(0, 15).map(e => e[0]),
-          zona_morna: zonaMorna,
-          repetentes_ultimo_concurso: repetentesProvaveis,
-          vizinhos_quentes: vizinhosQuentes
+          markov_next_state_prob: sortedMarkov,
+          backtest_pre_flight: {
+            previous_target_concurso: results[0]?.concurso,
+            successful_hits_in_backtest: backtestSuccess,
+            suggestion_delta: backtestSuccess < 2 ? "Aumentar entropia e busca por atrasos." : "Manter foco em frequências dominantes."
+          },
+          ...(analysisStrategy !== 'A' && {
+            zona_morna: zonaMorna,
+            repetentes_ultimo_concurso: repetentesProvaveis,
+            vizinhos_quentes: vizinhosQuentes
+          }),
+          ...(analysisStrategy === 'C' && { context_similitude: similitudeContext })
         };
 
       const feedbackContext = suggestions
@@ -460,28 +537,38 @@ export default function App() {
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: `[MIROFISH PRO ENGINE - ADVANCED SWARM SIMULATION]
-DADOS ESTATÍSTICOS (Graph Building):
+ESTADO DINÂMICO: Operando com base de ${results.length} concursos.
+ESTRATÉGIA ATIVA: ${analysisStrategy === 'A' ? 'OPÇÃO A (Clássica - Extremos)' : analysisStrategy === 'B' ? 'OPÇÃO B (Enriquecida - Universos Reais)' : 'OPÇÃO C (Analítica - Similitude/Clustering)'}
+
+DADOS ESTATÍSTICOS (Análise Temporal: ${analysisInterval === 0 ? 'Total' : `Últimos ${analysisInterval}`}):
 ${JSON.stringify(statsContext, null, 2)}
 
-DADOS HISTÓRICOS (Últimos 50):
+DADOS HISTÓRICOS (Contexto Sequencial Recente):
 ${recentResults}
 
-FEEDBACK DE CONFERÊNCIA (Loop de Aprendizado Contínuo):
-${feedbackContext || "Iniciando ciclo de aprendizado intensivo."}
+FEEDBACK DE CONFERÊNCIA (Loop de Aprendizado):
+${feedbackContext || "Iniciando ciclo de aprendizado."}
 
 TAREFA:
-1. Execute a simulação multiagente (30 ciclos) com perfis Conservador, Explorador e Híbrido.
-2. Utilize a memória temporal para evoluir as combinações.
-3. PREMISSA ABSOLUTA: Otimize as combinações para maximizar a probabilidade de acertos de 3, 4, 5 ou 6 dezenas em um mesmo jogo. Penalize severamente padrões de baixa performance (0, 1 ou 2 acertos).
-4. REGRA DE COMPOSIÇÃO DE UNIVERSOS: Para alcançar a premissa acima e quebrar o teto de 1-2 acertos, você DEVE mesclar dezenas dos extremos (quentes/atrasadas) com os novos universos fornecidos nos DADOS ESTATÍSTICOS:
-   - ZONA MORNA: Inclua 1 a 2 dezenas de média frequência em cada jogo.
-   - REPETENTES: Considere a forte probabilidade de 1 dezena do último concurso se repetir.
-   - VIZINHOS QUENTES: Utilize a adjacência das dezenas mais frequentes para capturar desvios locais.
-5. Gere EXATAMENTE 5 sugestões estratégicas com baixa sobreposição.
+1. Execute a simulação multiagente (30 ciclos).
+2. PREMISSA ABSOLUTA: Maximizar acertos de 3 a 6 dezenas no mesmo jogo.
+3. Quantidade Requisitada: EXATAMENTE ${suggestionCount} JOGOS.
+${analysisStrategy === 'A' ? '4. REGRA (Opção A): Foque no balanço entre Top Frequentes e Maiores Atrasos.' : ''}
+${analysisStrategy === 'B' ? '4. REGRA (Opção B): Utilize obrigatoriamente a ZONA MORNA (1-2 dezenas), REPETENTES e VIZINHOS QUENTES para quebrar o teto de 1-2 acertos.' : ''}
+${analysisStrategy === 'C' ? '4. REGRA (Opção C): Utilize o CONTEXTO DE SIMILITUDE. Priorize as dezenas que surgiram em janelas históricas com assinaturas de soma similares à atual.' : ''}
+5. ATENÇÃO: Você DEVE gerar EXATAMENTE ${suggestionCount} jogos no array 'sugestoes'. Cada jogo DEVE ter EXATAMENTE 6 números.
+6. FILTROS DE INTEGRIDADE CARTOGRÁFICA E ENTROPIA (Mandatório):
+   - Evite sequências longas (mais de 2 números seguidos).
+   - Mantenha a SOMA das dezenas de cada jogo preferencialmente entre 150 e 220.
+   - Aplique o balanço de quadrantes (distribua os números pelo volante 1-60).
+   - Balanceie PAR/ÍMPAR (idealmente 3:3, 4:2 ou 2:4).
 ${customObjective ? `6. DIRETRIZ DO USUÁRIO: ${customObjective}` : ''}
+7. ATENÇÃO: Você DEVE gerar EXATAMENTE ${suggestionCount} jogos no array 'sugestoes'. Nem mais, nem menos.
 Retorne JSON estrito.`,
         config: {
-          systemInstruction: SYSTEM_INSTRUCTION.replace('{MATURITY_LEVEL}', maturity.toString()),
+          systemInstruction: SYSTEM_INSTRUCTION
+            .replace('{MATURITY_LEVEL}', maturity.toString())
+            .replace('{SUGGESTION_COUNT}', suggestionCount.toString()),
           responseMimeType: "application/json",
           responseSchema: RESPONSE_SCHEMA,
         }
@@ -504,7 +591,7 @@ Retorne JSON estrito.`,
         insights: jsonResponse.prediction.insights_aprendizado,
         simulation_log: `Simulação concluída: ${jsonResponse.simulation_metadata.cycles_completed} ciclos. Taxa de convergência: ${jsonResponse.simulation_metadata.convergence_rate}.`,
 
-        hit_distribution: { low: 0, mid: 0, high: 0 } // Will be updated on conference
+        hit_distribution: { low: 0, mid: 0, high: 0 } // Será atualizado na conferência
       };
       
       setSuggestions(prev => {
@@ -533,15 +620,15 @@ Retorne JSON estrito.`,
     setError(null);
 
     try {
-      // Step 1: Reprocess Ingestion
+      // Passo 1: Reprocessar Ingestão
       setLearningProgress(30);
-      await new Promise(r => setTimeout(r, 1000)); // Simulate processing
+      await new Promise(r => setTimeout(r, 1000)); // Simular processamento
 
-      // Step 2: Recalibrate Swarm Context
+      // Passo 2: Recalibrar Contexto do Enxame
       setLearningProgress(60);
       await runIntelligence();
 
-      // Step 3: Finalize Learning & Save
+      // Passo 3: Finalizar Aprendizado e Salvar
       setLearningProgress(90);
       const newMaturity = maturity + 1;
       setMaturity(newMaturity);
@@ -587,6 +674,37 @@ Retorne JSON estrito.`,
       saveState(results, updated);
       return updated;
     });
+  };
+
+  // --- NEW UTILITIES FOR ADVANCED ANALYSIS ---
+  
+  const getGameMetrics = (game: number[]) => {
+    const evens = game.filter(n => n % 2 === 0).length;
+    const odds = game.length - evens;
+    const sum = game.reduce((a, b) => a + b, 0);
+    const quadrants = { q1: 0, q2: 0, q3: 0, q4: 0 };
+    game.forEach(n => {
+      if (n <= 15) quadrants.q1++;
+      else if (n <= 30) quadrants.q2++;
+      else if (n <= 45) quadrants.q3++;
+      else quadrants.q4++;
+    });
+    return { evens, odds, sum, quadrants };
+  };
+
+  const calculateMarkovTransistions = (results: LotteryResult[]) => {
+    const transitions: Record<number, Record<number, number>> = {};
+    for (let i = 0; i < results.length - 1; i++) {
+      const current = results[i].dezenas;
+      const prev = results[i + 1].dezenas;
+      prev.forEach(p => {
+        if (!transitions[p]) transitions[p] = {};
+        current.forEach(c => {
+          transitions[p][c] = (transitions[p][c] || 0) + 1;
+        });
+      });
+    }
+    return transitions;
   };
 
   const clearDatabase = async () => {
@@ -719,6 +837,18 @@ Retorne JSON estrito.`,
     const links: GraphLink[] = [];
     const pairCounts: Record<string, number> = {};
 
+    // Cálculo de Markov para intensidade visual do heatmap
+    const transitions = calculateMarkovTransistions(results.slice(0, 500));
+    const lastResult = results[0]?.dezenas || [];
+    const markovIntensities: Record<number, number> = {};
+    lastResult.forEach(p => {
+      if (transitions[p]) {
+        Object.entries(transitions[p]).forEach(([target, count]) => {
+          markovIntensities[parseInt(target)] = (markovIntensities[parseInt(target)] || 0) + count;
+        });
+      }
+    });
+
     results.forEach((r, idx) => {
       r.dezenas.forEach(d => {
         if (nodes[d - 1]) nodes[d - 1].frequency++;
@@ -735,11 +865,13 @@ Retorne JSON estrito.`,
     nodes.forEach(n => {
       const lastIndex = results.findIndex(r => r.dezenas.includes(n.id));
       n.delay = lastIndex === -1 ? results.length : lastIndex;
+      // Aumentar a intensidade visual do nó com base na intensidade de Markov
+      if (markovIntensities[n.id]) n.frequency += markovIntensities[n.id] * 2;
     });
 
     Object.entries(pairCounts).forEach(([pair, count]) => {
       const [s, t] = pair.split(',').map(Number);
-      if (count > 2) { // Only significant connections
+      if (count > 2) { // Apenas conexões significativas
         links.push({ source: s, target: t, weight: count });
       }
     });
@@ -782,7 +914,7 @@ Retorne JSON estrito.`,
       <input type="file" accept=".csv" className="hidden" ref={fileInputRef} onChange={handleFileUpload} />
       <input type="file" accept=".json" className="hidden" ref={importInputRef} onChange={importMemory} />
       
-      {/* Sidebar */}
+      {/* Barra Lateral */}
       <nav className={cn(
         "fixed left-0 top-0 h-full w-20 md:w-64 border-r z-50 flex flex-col py-8 px-4 gap-8 transition-colors",
         theme === 'dark' ? "bg-[#0d1428] border-slate-800" : "bg-white border-slate-200"
@@ -805,7 +937,7 @@ Retorne JSON estrito.`,
         </div>
       </nav>
 
-      {/* Main Content */}
+      {/* Conteúdo Principal */}
       <main className="pl-20 md:pl-64 min-h-screen p-4 md:p-10">
         <header className="mb-10 flex justify-between items-center">
           <div>
@@ -934,6 +1066,45 @@ Retorne JSON estrito.`,
                     </div>
 
                     <div className="space-y-4">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-500 mb-2 uppercase tracking-wider">Estratégia</label>
+                          <select 
+                            value={analysisStrategy}
+                            onChange={(e) => setAnalysisStrategy(e.target.value as 'A' | 'B' | 'C')}
+                            className={cn("w-full px-3 py-2 rounded-xl border outline-none text-xs font-bold transition-all", theme === 'dark' ? "bg-slate-900/50 border-slate-800" : "bg-white border-slate-200")}
+                          >
+                            <option value="A">Opção A (Clássica)</option>
+                            <option value="B">Opção B (Enriquecida)</option>
+                            <option value="C">Opção C (Analítica)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-500 mb-2 uppercase tracking-wider">Janela de Análise</label>
+                          <select 
+                            value={analysisInterval}
+                            onChange={(e) => setAnalysisInterval(parseInt(e.target.value))}
+                            className={cn("w-full px-3 py-2 rounded-xl border outline-none text-xs font-bold transition-all", theme === 'dark' ? "bg-slate-900/50 border-slate-800" : "bg-white border-slate-200")}
+                          >
+                            <option value={0}>Toda a Base ({results.length})</option>
+                            <option value={100}>Últimos 100</option>
+                            <option value={500}>Últimos 500</option>
+                            <option value={1000}>Últimos 1000</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-500 mb-2 uppercase tracking-wider">Quantidade de Jogos</label>
+                          <select 
+                            value={suggestionCount}
+                            onChange={(e) => setSuggestionCount(parseInt(e.target.value) as 5 | 10)}
+                            className={cn("w-full px-3 py-2 rounded-xl border outline-none text-xs font-bold transition-all", theme === 'dark' ? "bg-slate-900/50 border-slate-800" : "bg-white border-slate-200")}
+                          >
+                            <option value={5}>5 Jogos</option>
+                            <option value={10}>10 Jogos</option>
+                          </select>
+                        </div>
+                      </div>
+
                       <div>
                         <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wider">Diretriz de Otimização (Opcional)</label>
                         <textarea
@@ -950,7 +1121,7 @@ Retorne JSON estrito.`,
                       <div className="flex flex-col gap-3">
                         <button onClick={runIntelligence} disabled={loading || learning || results.length === 0} className="w-full py-5 bg-blue-600 hover:bg-blue-500 text-white font-black rounded-2xl shadow-2xl shadow-blue-900/30 flex items-center justify-center gap-3 transition-all disabled:opacity-50">
                           {loading ? <Loader2 className="w-6 h-6 animate-spin" /> : <Sparkles className="w-6 h-6" />}
-                          GERAR 5 JOGOS OTIMIZADOS
+                          GERAR {suggestionCount} JOGOS OTIMIZADOS
                         </button>
                         
                         <button onClick={runLearningCycle} disabled={loading || learning || results.length === 0} className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-2xl border border-slate-700 flex items-center justify-center gap-2 transition-all disabled:opacity-50">
@@ -983,7 +1154,7 @@ Retorne JSON estrito.`,
                     )}
                   </div>
 
-                  {/* Agent Debate */}
+                  {/* Debate de Agentes */}
                   {swarmResult && (
                     <div className="grid grid-cols-1 gap-4">
                       <div className="p-4 bg-blue-500/10 border border-blue-500/20 rounded-2xl">
@@ -1003,14 +1174,14 @@ Retorne JSON estrito.`,
                 <div className="lg:col-span-8 space-y-6">
                   {suggestions.length > 0 ? (
                     <div className="space-y-6">
-                      {/* Latest Suggestion with Conference */}
+                      {/* Sugestão mais recente com Conferência */}
                       <div className={cn("rounded-[40px] p-8 border shadow-2xl space-y-8", theme === 'dark' ? "bg-[#141c31] border-slate-800" : "bg-white border-slate-200")}>
                         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                           <h3 className="text-xl font-bold flex items-center gap-2">
                             <Trophy className="w-6 h-6 text-yellow-400" /> Sugestões Estratégicas
                           </h3>
                           
-                          {/* Real Result Input */}
+                          {/* Entrada de Resultado Real */}
                           <div className="flex items-center gap-2 w-full md:w-auto">
                             <button 
                               onClick={() => exportSuggestionsToCSV(suggestions[0])}
@@ -1041,16 +1212,36 @@ Retorne JSON estrito.`,
                             const hits = actual ? game.filter(n => actual.includes(n)) : [];
                             return (
                               <div key={idx} className={cn(
-                                "flex flex-wrap gap-3 p-5 rounded-2xl border transition-all relative overflow-hidden",
+                                "flex flex-col gap-3 p-5 rounded-2xl border transition-all relative overflow-hidden",
                                 theme === 'dark' ? "bg-slate-900/50 border-slate-800" : "bg-slate-50 border-slate-200"
                               )}>
-                                <div className="flex items-center gap-3 w-full mb-2">
-                                  <span className="px-2 py-1 bg-blue-600 text-white rounded text-[10px] font-black uppercase">Jogo {idx + 1}</span>
-                                  {actual && (
-                                    <span className="text-xs font-black text-green-400 flex items-center gap-1">
-                                      <CheckCircle2 className="w-3 h-3" /> {hits.length} ACERTOS
-                                    </span>
-                                  )}
+                                <div className="flex items-center justify-between w-full mb-2">
+                                  <div className="flex items-center gap-3">
+                                    <span className="px-2 py-1 bg-blue-600 text-white rounded text-[10px] font-black uppercase">Jogo {idx + 1}</span>
+                                    {actual && (
+                                      <span className="text-xs font-black text-green-400 flex items-center gap-1">
+                                        <CheckCircle2 className="w-3 h-3" /> {hits.length} ACERTOS
+                                      </span>
+                                    )}
+                                  </div>
+                                  
+                                  {/* Crachás de Métricas */}
+                                  <div className="flex gap-2">
+                                    {(() => {
+                                      const { evens, odds, sum } = getGameMetrics(game);
+                                      return (
+                                        <>
+                                          <span className="text-[9px] px-2 py-0.5 bg-slate-800 rounded-full text-slate-400 border border-slate-700">P/I: {evens}/{odds}</span>
+                                          <span className={cn(
+                                            "text-[9px] px-2 py-0.5 rounded-full border",
+                                            sum >= 150 && sum <= 220 
+                                              ? "bg-green-500/10 text-green-400 border-green-500/20" 
+                                              : "bg-orange-500/10 text-orange-400 border-orange-500/20"
+                                          )}>SOMA: {sum}</span>
+                                        </>
+                                      );
+                                    })()}
+                                  </div>
                                 </div>
                                 <div className="flex flex-wrap gap-3">
                                   {game.map((num, i) => (
@@ -1089,7 +1280,7 @@ Retorne JSON estrito.`,
                         )}
                       </div>
 
-                      {/* History Log */}
+                      {/* Log de Histórico */}
                       <div className="space-y-4">
                         <h4 className="text-sm font-bold text-slate-500 uppercase tracking-widest px-2">Log de Evolução MiroFish</h4>
                         <div className="space-y-3">
@@ -1434,7 +1625,7 @@ function SwarmGraph({ data, theme }: { data: SwarmGraphData, theme: string }) {
 
     const g = svg.append("g");
 
-    // Zoom behavior
+    // Comportamento de zoom
     const zoom = d3.zoom<SVGSVGElement, unknown>()
       .scaleExtent([0.1, 8])
       .on("zoom", (event) => {
