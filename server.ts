@@ -6,6 +6,8 @@ import dotenv from "dotenv";
 import fs from "fs/promises";
 import fsSync from "fs";
 
+import apiRouter from "./backend/routes/api";
+
 dotenv.config();
 
 const app = express();
@@ -14,6 +16,8 @@ const STATE_FILE = path.join(process.cwd(), "state.json");
 const PERSISTENCE_LIMIT_MB = 10;
 
 app.use(express.json({ limit: '50mb' }));
+
+app.use("/api", apiRouter);
 
 // Auxiliar para obter o tamanho do arquivo
 const getFileSize = async (filePath: string) => {

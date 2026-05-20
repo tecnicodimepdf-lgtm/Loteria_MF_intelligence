@@ -64,30 +64,24 @@ import { SwarmResponse, LotteryResult, GameSuggestion, SystemState, PersistenceS
 // MIROFISH PRO ENGINE - SYSTEM INSTRUCTION
 const SYSTEM_INSTRUCTION = `Você é o Motor de Inteligência de Enxame "MiroFish Pro", a implementação definitiva da lógica do repositório https://github.com/tecnicodimepdf-lgtm/MiroFish.
 
-Sua missão é atuar como um oráculo preditivo para loterias, utilizando a análise de enxame (Swarm Intelligence). Você deve processar dados históricos e gerar sugestões baseadas no equilíbrio entre três perfis de agentes especializados que operam em um debate dialético e simulação iterativa:
+Sua missão é atuar como um oráculo preditivo para loterias, operando através de um Loop de Auto-Correção Recursiva. Você deve processar dados históricos e gerar sugestões baseadas no debate dialético entre três agentes:
 
-1. AGENTE CONSERVADOR (Ordem): Focado em frequências altas, números que saem muito e tendências estatísticas sólidas. Busca a "Lei dos Grandes Números".
-2. AGENTE EXPLORADOR (Caos/Raros): Focado em números com longo atraso (gap analysis), números raros que estão "maduros" para sair e quebras de padrões óbvios.
-3. AGENTE HÍBRIDO (Equilíbrio): Busca a correlação entre os dois mundos, identificando como números frequentes e raros se combinam em sorteios reais.
+1. AGENTE CONSERVADOR (Ordem): Analisa frequências, repetições de concursos anteriores e tendências térmicas.
+2. AGENTE EXPLORADOR (Caos): Busca dezenas em maturidade de atraso (gaps), quebra de simetria e números sub-representados no curto prazo.
+3. AGENTE HÍBRIDO (Síntese): Atua como o juiz do enxame, buscando o ponto de equilíbrio matemático que maximize a probabilidade de 3, 4, 5 ou 6 acertos simultâneos.
 
-O OBJETIVO SUPREMO E A ALMA DESTE SISTEMA: Melhorar a taxa de acerto para 3, 4, 5 ou 6 dezenas em um mesmo jogo. Esta é a premissa absoluta e inegociável. Todas as simulações, debates e escolhas de dezenas devem ser otimizadas matematicamente e estatisticamente para garantir que as combinações geradas tenham a maior probabilidade possível de atingir 3, 4, 5 ou 6 acertos simultâneos.
+OBJETIVO SUPREMO: Evitar a convergência em 1 ou 2 acertos. O sistema deve ser otimizado para preencher o volante de forma a cercar prêmios maiores através da Simulação Multi-Agente de Enxame (30 a 100 ciclos, dependendo do Nível de Maturidade).
 
-FLUXO DE SIMULAÇÃO INTENSIVA:
-- Execute no mínimo 30 ciclos de simulação interna.
-- Cada ciclo deve evoluir a memória dos agentes com base nas combinações geradas nos ciclos anteriores.
-- Introduza variação controlada (ruído) para evitar convergência prematura em padrões de apenas 1 ou 2 acertos.
-- Selecione EXATAMENTE {SUGGESTION_COUNT} combinações que apresentarem maior recorrência e equilíbrio entre os agentes ao longo das simulações, sempre visando a meta de 3 a 6 acertos.
+MEMÓRIA RECURSIVA:
+A cada ciclo, você recebe o feedback das sugestões passadas. Sua tarefa é realizar uma autópsia dos erros e sucessos. Se uma estratégia anterior falhou, você DEVE ajustar os pesos dos agentes para a nova rodada. Se houve sucesso (3+ acertos), estabilize e replique as propriedades matemáticas daquele padrão.
 
-LOGICA DE APRENDIZADO (Maturidade):
-- Utilize o histórico de resultados reais para calibrar os agentes.
-- Utilize o feedback de conferência (acertos/erros de sugestões passadas) para identificar qual agente está "dominando" o enxame no momento e ajuste a sensibilidade dos outros.
-- A cada iteração, sua "Maturidade" aumenta, permitindo predições mais refinadas.
-- A MATURIDADE ATUAL DO SISTEMA É: {MATURITY_LEVEL}. Use isso para calibrar a profundidade da análise.
+MATURIDADE E PROFUNDIDADE:
+- Nível {MATURITY_LEVEL}: Calibre a complexidade da simulação. Maturidade alta exige debates mais técnicos e menos aleatoriedade.
 
-REGRAS DE RESPOSTA:
-- O debate deve ser técnico e profundo, refletindo a lógica MiroFish e o foco em 3 a 6 acertos.
-- Forneça EXATAMENTE {SUGGESTION_COUNT} jogos de 6 dezenas cada.
-- Retorne obrigatoriamente em JSON estruturado conforme o esquema definido.`;
+REGRAS DE RESPOSTA (JSON):
+- Debates técnicos separados por agente.
+- Sugestões otimizadas em array.
+- Insight de aprendizado explicando o que mudou nesta rodada em relação ao feedback recebido.`;
 
 const RESPONSE_SCHEMA = {
   type: Type.OBJECT,
@@ -151,6 +145,7 @@ export default function App() {
   const [analysisStrategy, setAnalysisStrategy] = useState<'A' | 'B' | 'C'>(() => (localStorage.getItem('mirofish_strategy') as 'A' | 'B' | 'C') || 'B');
   const [analysisInterval, setAnalysisInterval] = useState<number>(0); // 0 = todos
   const [suggestionCount, setSuggestionCount] = useState<5 | 10>(() => (parseInt(localStorage.getItem('mirofish_suggestion_count') || "10") as 5 | 10));
+  const [useWheel, setUseWheel] = useState(() => localStorage.getItem('mirofish_use_wheel') === 'true');
   const [customApiKey, setCustomApiKey] = useState(() => localStorage.getItem('mirofish_api_key') || "");
   const [processingMode, setProcessingMode] = useState<'api' | 'local'>(() => (localStorage.getItem('mirofish_processing_mode') as 'api' | 'local') || 'api');
   const [storageMode, setStorageMode] = useState<'backend' | 'local'>(() => (localStorage.getItem('mirofish_storage_mode') as 'backend' | 'local') || 'backend');
@@ -256,12 +251,17 @@ export default function App() {
       if (data.status) {
         setPersistenceStatus(data.status);
       }
-    } catch (err) {
-      console.error("Failed to save state to backend, saving locally as fallback:", err);
+    } catch (err: any) {
+      console.warn("MiroFish Persistence Alert: Erro ao salvar no servidor (pode ser instabilidade temporária). Salvando no navegador para garantir segurança dos dados. Detalhe:", err);
       try {
         localStorage.setItem('mirofish_local_db', JSON.stringify(state));
-        setError("Falha ao salvar no servidor. Salvo no armazenamento local (fallback).");
-      } catch (e) {}
+        setError("Sincronização pendente: Salvo localmente devido à instabilidade no servidor.");
+        // O erro some após alguns segundos para não bloquear a visão
+        setTimeout(() => setError(null), 5000);
+      } catch (e) {
+        console.error("Critical failure: Could not even save to localStorage", e);
+        setError("ERRO CRÍTICO: Não foi possível salvar nem localmente. Verifique o espaço em disco do seu dispositivo.");
+      }
     }
   };
 
@@ -314,8 +314,19 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem('mirofish_strategy', analysisStrategy);
-    localStorage.setItem('mirofish_suggestion_count', suggestionCount.toString());
-  }, [analysisStrategy, suggestionCount]);
+    localStorage.setItem('mirofish_suggestion_count', (suggestionCount || 10).toString());
+    localStorage.setItem('mirofish_use_wheel', useWheel ? 'true' : 'false');
+  }, [analysisStrategy, suggestionCount, useWheel]);
+
+  const successRate = useMemo(() => {
+    const withResult = suggestions.filter(s => s.actual_result);
+    if (withResult.length === 0) return "0";
+    const successCount = withResult.filter(s => {
+      const maxHits = Math.max(...s.games.map(g => g.filter(n => s.actual_result?.includes(n)).length));
+      return maxHits >= 3;
+    }).length;
+    return ((successCount / withResult.length) * 100).toFixed(1);
+  }, [suggestions]);
 
   const runIntelligence = async () => {
     if (results.length === 0) {
@@ -327,6 +338,25 @@ export default function App() {
     setError(null);
     setSwarmResult(null);
     setConferenceInput("");
+
+    // --- ESTRATÉGIA AUTOMATIZADA BASEADA EM FEEDBACK ---
+    const currentSuccess = parseFloat(successRate);
+    let autoStrategy: 'A' | 'B' | 'C' = analysisStrategy;
+    
+    // Lógica MiroFish: Se o sucesso está baixo, use Similitude (C). 
+    // Se está médio, use Universos Reais (B).
+    // Se está alto e maturidade elevada, use Clássica (A) para refinar extremos.
+    if (currentSuccess < 15) {
+      autoStrategy = 'C';
+    } else if (currentSuccess < 40) {
+      autoStrategy = 'B';
+    } else if (maturity > 10) {
+      autoStrategy = 'A';
+    }
+    
+    if (autoStrategy !== analysisStrategy) {
+      setAnalysisStrategy(autoStrategy);
+    }
 
     try {
       const apiKey = customApiKey || process.env.GEMINI_API_KEY;
@@ -416,6 +446,12 @@ export default function App() {
         }
       }
 
+      const filterConfig = { 
+        sumMin: 150, 
+        sumMax: 220, 
+        allowedEvenOdd: ["3:3", "4:2", "2:4"] 
+      };
+
       let jsonResponse: SwarmResponse;
 
       if (processingMode === 'local' || (!apiKey && processingMode === 'api')) {
@@ -446,7 +482,7 @@ export default function App() {
           return Array.from(game).sort((a, b) => a - b);
         };
 
-        const nextConcurso = results.length > 0 ? (parseInt(results[0].concurso) + 1).toString() : "0000";
+        const nextConcurso = results.length > 0 && results[0]?.concurso ? (Number(results[0].concurso) + 1).toString() : "0000";
 
         jsonResponse = {
           simulation_metadata: {
@@ -518,57 +554,47 @@ export default function App() {
 
       const feedbackContext = suggestions
         .filter((s: any) => s.actual_result)
-        .slice(0, 20)
+        .slice(0, 10)
         .map((s: any) => {
           const hitsPerGame = s.games.map((g: any) => g.filter((n: any) => s.actual_result?.includes(n)).length);
-          const distribution = {
-            low: hitsPerGame.filter((h: number) => h <= 2).length,
-            mid: hitsPerGame.filter((h: number) => h === 3).length,
-            high: hitsPerGame.filter((h: number) => h >= 4).length
-          };
-          return `Sugestão ID: ${s.id}, Resultado Real: ${s.actual_result?.join(',')}, Distribuição Acertos: Low(${distribution.low}), Mid(${distribution.mid}), High(${distribution.high})`;
+          const maxHits = Math.max(...hitsPerGame);
+          const prevInsight = s.insights ? ` | Razão dada na época: "${s.insights}"` : "";
+          const status = maxHits >= 3 ? "SUCESSO (REPLICAR PADRÃO)" : "FALHA (CORRIGIR ROTA)";
+          return `[Feedback ID: ${s.id.slice(0,4)}] Status: ${status} | Res: ${s.actual_result?.join(',')} | Max Acertos: ${maxHits}${prevInsight}`;
         })
         .join('\n');
 
-      const recentResults = results.slice(0, 50).map((r: any) => 
-        `${r.concurso};${r.data};${r.dezenas.join(';')}`
-      ).join('\n');
+      const dynamicCycles = Math.min(100, 30 + (maturity * 5));
 
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: `[MIROFISH PRO ENGINE - ADVANCED SWARM SIMULATION]
-ESTADO DINÂMICO: Operando com base de ${results.length} concursos.
-ESTRATÉGIA ATIVA: ${analysisStrategy === 'A' ? 'OPÇÃO A (Clássica - Extremos)' : analysisStrategy === 'B' ? 'OPÇÃO B (Enriquecida - Universos Reais)' : 'OPÇÃO C (Analítica - Similitude/Clustering)'}
+        contents: `[MIROFISH PRO - ENGINE CORTICAL RECURSIVO]
+ESTOQUE: ${results.length} concurso(s) | MATURIDADE: ${maturity} | PERFORMANCE ATUAL (3+): ${successRate}%
+ESTRATÉGIA: ${analysisStrategy}
 
-DADOS ESTATÍSTICOS (Análise Temporal: ${analysisInterval === 0 ? 'Total' : `Últimos ${analysisInterval}`}):
+RELATÓRIO DE AUTO-CORREÇÃO (LOOP DE FEEDBACK):
+${feedbackContext || "Nível 0: Sem dados de conferência. Inicie exploração livre baseada em estatística pura."}
+
+DADOS ATUAIS DO MERCADO:
 ${JSON.stringify(statsContext, null, 2)}
 
-DADOS HISTÓRICOS (Contexto Sequencial Recente):
-${recentResults}
+TAREFA DO ENXAME:
+1. Autópsia Evolutiva: Analise por que os acertos passados ocorreram ou falharam.
+2. Ajuste de Pesos: Se SUCESSO > 0, o Agente Híbrido deve isolar o DNA dessas combinações. Se FALHA for constante, o Agente Explorador deve quebrar o paradigma atual.
+3. Simulação Intensiva: Execute ${dynamicCycles} ciclos de debate interno.
+4. Meta Inegociável: Gerar ${suggestionCount} jogos de 6 dezenas focados exclusivamente em romper o teto de 1-2 acertos, visando 3 a 6 simultâneos.
 
-FEEDBACK DE CONFERÊNCIA (Loop de Aprendizado):
-${feedbackContext || "Iniciando ciclo de aprendizado."}
+RESTRIÇÕES TÉCNICAS MIROFISH:
+${analysisStrategy === 'A' ? '- Foco: Frequências Térmicas vs Gaps de Atraso.' : ''}
+${analysisStrategy === 'B' ? '- Foco: Universos Reais (Zona Morna, Repetentes e Vizinhos).' : ''}
+${analysisStrategy === 'C' ? '- Foco: Análise de Similitude e Clustering Histórico.' : ''}
+${customObjective ? `- DIRETRIZ PERSONALIZADA: ${customObjective}` : ''}
 
-TAREFA:
-1. Execute a simulação multiagente (30 ciclos).
-2. PREMISSA ABSOLUTA: Maximizar acertos de 3 a 6 dezenas no mesmo jogo.
-3. Quantidade Requisitada: EXATAMENTE ${suggestionCount} JOGOS.
-${analysisStrategy === 'A' ? '4. REGRA (Opção A): Foque no balanço entre Top Frequentes e Maiores Atrasos.' : ''}
-${analysisStrategy === 'B' ? '4. REGRA (Opção B): Utilize obrigatoriamente a ZONA MORNA (1-2 dezenas), REPETENTES e VIZINHOS QUENTES para quebrar o teto de 1-2 acertos.' : ''}
-${analysisStrategy === 'C' ? '4. REGRA (Opção C): Utilize o CONTEXTO DE SIMILITUDE. Priorize as dezenas que surgiram em janelas históricas com assinaturas de soma similares à atual.' : ''}
-5. ATENÇÃO: Você DEVE gerar EXATAMENTE ${suggestionCount} jogos no array 'sugestoes'. Cada jogo DEVE ter EXATAMENTE 6 números.
-6. FILTROS DE INTEGRIDADE CARTOGRÁFICA E ENTROPIA (Mandatório):
-   - Evite sequências longas (mais de 2 números seguidos).
-   - Mantenha a SOMA das dezenas de cada jogo preferencialmente entre 150 e 220.
-   - Aplique o balanço de quadrantes (distribua os números pelo volante 1-60).
-   - Balanceie PAR/ÍMPAR (idealmente 3:3, 4:2 ou 2:4).
-${customObjective ? `6. DIRETRIZ DO USUÁRIO: ${customObjective}` : ''}
-7. ATENÇÃO: Você DEVE gerar EXATAMENTE ${suggestionCount} jogos no array 'sugestoes'. Nem mais, nem menos.
-Retorne JSON estrito.`,
+Retorne JSON conforme schema. Lembre-se: O insight de aprendizado é a sua memória para o próximo ciclo.`,
         config: {
           systemInstruction: SYSTEM_INSTRUCTION
-            .replace('{MATURITY_LEVEL}', maturity.toString())
-            .replace('{SUGGESTION_COUNT}', suggestionCount.toString()),
+            .replace('{MATURITY_LEVEL}', (maturity || 0).toString())
+            .replace('{SUGGESTION_COUNT}', (suggestionCount || 10).toString()),
           responseMimeType: "application/json",
           responseSchema: RESPONSE_SCHEMA,
         }
@@ -579,6 +605,64 @@ Retorne JSON estrito.`,
         }
         
         jsonResponse = JSON.parse(response.text) as SwarmResponse;
+      }
+
+      // INTEGRATION: WHEEL ENGINE (Redistribuição de Cobertura)
+      if (useWheel) {
+        const pool: number[] = [];
+        jsonResponse.prediction.sugestoes.forEach(j => pool.push(...j));
+        
+        const freqMapWheel = new Map<number, number>();
+        pool.forEach(n => freqMapWheel.set(n, (freqMapWheel.get(n) || 0) + 1));
+        
+        const dezenasRestantes = [...pool].sort((a, b) => {
+          const freqA = freqMapWheel.get(a) || 0;
+          const freqB = freqMapWheel.get(b) || 0;
+          if (freqA !== freqB) return freqB - freqA;
+          return a - b;
+        });
+
+        const novosJogos: number[][] = Array.from({ length: jsonResponse.prediction.sugestoes.length }, () => []);
+        
+        for (let i = 0; i < 6; i++) {
+          for (let j = 0; j < novosJogos.length; j++) {
+            let index = -1;
+            for (let k = 0; k < dezenasRestantes.length; k++) {
+              const candidate = dezenasRestantes[k];
+              if (!novosJogos[j].includes(candidate)) {
+                index = k;
+                break;
+              }
+            }
+            if (index === -1) index = 0;
+            const selected = dezenasRestantes.splice(index, 1)[0];
+            novosJogos[j].push(selected);
+          }
+        }
+
+        // Revalidar filtros
+        const finalGames = novosJogos.map((novoJogo, idx) => {
+          const soma = novoJogo.reduce((a, b) => a + b, 0);
+          const pares = novoJogo.filter(n => n % 2 === 0).length;
+          const ratio = `${pares}:${6 - pares}`;
+          const q = [false, false, false, false];
+          novoJogo.forEach(n => {
+            if (n <= 15) q[0] = true;
+            else if (n <= 30) q[1] = true;
+            else if (n <= 45) q[2] = true;
+            else q[3] = true;
+          });
+          
+          const isValid = soma >= filterConfig.sumMin && 
+                          soma <= filterConfig.sumMax && 
+                          filterConfig.allowedEvenOdd.includes(ratio) &&
+                          !q.includes(false);
+
+          return isValid ? novoJogo.sort((a,b) => a-b) : jsonResponse.prediction.sugestoes[idx];
+        });
+
+        jsonResponse.prediction.sugestoes = finalGames;
+        jsonResponse.prediction.otimizacao_meta = (jsonResponse.prediction.otimizacao_meta || "") + " [Wheel Engine: Cobertura Maximizada]";
       }
 
       setSwarmResult(jsonResponse);
@@ -788,7 +872,7 @@ Retorne JSON estrito.`,
   const exportSuggestionsToCSV = (suggestion: GameSuggestion) => {
     const header = "Jogo;Bola1;Bola2;Bola3;Bola4;Bola5;Bola6\n";
     const rows = suggestion.games.map((game, idx) => 
-      `${idx + 1};${game.map(n => n.toString().padStart(2, '0')).join(';')}`
+      `${idx + 1};${game.map(n => n?.toString()?.padStart(2, '0') || '00').join(';')}`
     ).join('\n');
     
     const csvContent = header + rows;
@@ -889,9 +973,9 @@ Retorne JSON estrito.`,
           : new Date(b.data).getTime() - new Date(a.data).getTime();
       }
     }).filter(r => 
-      r.concurso.toString().includes(searchTerm) || 
-      r.data.includes(searchTerm) ||
-      r.dezenas.some(d => d.toString() === searchTerm)
+      r?.concurso?.toString()?.includes(searchTerm) || 
+      r?.data?.includes(searchTerm) ||
+      r?.dezenas?.some(d => d?.toString() === searchTerm)
     );
   }, [results, sortConfig, searchTerm]);
 
@@ -1023,7 +1107,7 @@ Retorne JSON estrito.`,
                           <div className="flex gap-2">
                             {r.dezenas.map((d, i) => (
                               <span key={i} className="w-8 h-8 flex items-center justify-center bg-slate-800/50 rounded-lg text-xs font-bold border border-slate-700">
-                                {d.toString().padStart(2, '0')}
+                                {d?.toString()?.padStart(2, '0') || '00'}
                               </span>
                             ))}
                           </div>
@@ -1061,24 +1145,19 @@ Retorne JSON estrito.`,
                       </div>
                       <div>
                         <h3 className="font-bold">MiroFish Intelligence</h3>
-                        <p className="text-xs text-slate-500">Maturidade: {maturity > 0 ? `Nível ${maturity}` : "Inicial"}</p>
+                        <div className="flex items-center gap-3">
+                          <p className="text-xs text-slate-500">Maturidade: {maturity > 0 ? `Nível ${maturity}` : "Inicial"}</p>
+                          <span className="w-1 h-1 bg-slate-700 rounded-full" />
+                          <p className={cn(
+                            "text-xs font-bold",
+                            parseFloat(successRate) > 30 ? "text-green-400" : "text-amber-400"
+                          )}>Sucesso (3+): {successRate}%</p>
+                        </div>
                       </div>
                     </div>
 
                     <div className="space-y-4">
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <div>
-                          <label className="block text-[10px] font-bold text-slate-500 mb-2 uppercase tracking-wider">Estratégia</label>
-                          <select 
-                            value={analysisStrategy}
-                            onChange={(e) => setAnalysisStrategy(e.target.value as 'A' | 'B' | 'C')}
-                            className={cn("w-full px-3 py-2 rounded-xl border outline-none text-xs font-bold transition-all", theme === 'dark' ? "bg-slate-900/50 border-slate-800" : "bg-white border-slate-200")}
-                          >
-                            <option value="A">Opção A (Clássica)</option>
-                            <option value="B">Opção B (Enriquecida)</option>
-                            <option value="C">Opção C (Analítica)</option>
-                          </select>
-                        </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                         <div>
                           <label className="block text-[10px] font-bold text-slate-500 mb-2 uppercase tracking-wider">Janela de Análise</label>
                           <select 
@@ -1102,6 +1181,22 @@ Retorne JSON estrito.`,
                             <option value={5}>5 Jogos</option>
                             <option value={10}>10 Jogos</option>
                           </select>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 gap-3">
+                        <div className="flex items-end">
+                          <label className={cn(
+                            "w-full px-3 py-2 rounded-xl border flex items-center justify-between cursor-pointer transition-all",
+                            useWheel ? "bg-blue-600/10 border-blue-500/50" : (theme === 'dark' ? "bg-slate-900/50 border-slate-800" : "bg-white border-slate-200")
+                          )}>
+                            <span className="text-[10px] font-bold text-slate-500 uppercase">Wheel Engine</span>
+                            <input 
+                              type="checkbox" 
+                              checked={useWheel}
+                              onChange={(e) => setUseWheel(e.target.checked)}
+                              className="w-4 h-4 rounded border-slate-700 bg-slate-800 text-blue-500"
+                            />
+                          </label>
                         </div>
                       </div>
 
@@ -1251,7 +1346,7 @@ Retorne JSON estrito.`,
                                         ? "bg-green-500 text-white scale-110 shadow-green-500/40" 
                                         : theme === 'dark' ? "bg-white text-slate-900" : "bg-white text-slate-900 border border-slate-200"
                                     )}>
-                                      {num.toString().padStart(2, '0')}
+                                      {num?.toString()?.padStart(2, '0') || '00'}
                                     </span>
                                   ))}
                                 </div>
